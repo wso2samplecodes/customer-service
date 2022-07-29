@@ -49,7 +49,7 @@
         </dependency>
     </dependencies>
     <build>
-        <finalName>external1</finalName>
+        <finalName>external</finalName>
         <plugins>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>

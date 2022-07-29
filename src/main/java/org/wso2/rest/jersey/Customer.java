@@ -144,9 +144,9 @@ public class Customer {
     }
 
     @GET
-    @Path("/info")
-    public Response get_staff() {
-        String output = "get staff called";
+    @Path("/test")
+    public Response get_test() {
+        String output = "get test method called";
         return Response.status(200).entity(output).build();
     }
 }
