@@ -1,92 +1,89 @@
 @App:name('WebSub')
 @App:description('Description of the plan')
 
-@source(type='websubhub',hub.id = "account_hub",table.name = "AccountNotificationTable",receiver.url = "http://localhost:8006/account/subscribe",basic.auth.enabled = "false",topic.list = "account",
-	@map(type='keyvalue',implicit.cast.enable = "true",
+@sink(type = 'websubhub', hub.id = "account_hub", table.name = "AccountNotificationTable", on.error = "STREAM",
+	@map(type = 'keyvalue'))
+@store(type = "rdbms", jdbc.url = "jdbc:mysql://localhost:3306/websubhubdb?useSSL=false", username = "root", password = "rootroot", jdbc.driver.name = "com.mysql.cj.jdbc.Driver")
+@OnError(action = "STREAM")
+define stream AccountNotificationStream (topic string, payload string);
+
+@source(type = 'kafka', topic.list = "company_log", partition.no.list = "0", threading.option = "single.thread", group.id = "group", bootstrap.servers = "localhost:9092",
+	@map(type = 'json'))
+define stream SendAccountNotificationStream (topic string, content string, uuid string);
+
+@source(type = 'websubhub', hub.id = "account_hub", table.name = "AccountNotificationTable", receiver.url = "http://localhost:8006/account/subscribe", basic.auth.enabled = "false", topic.list = "company_log",
+	@map(type = 'keyvalue', implicit.cast.enable = "true",
 		@payload("payload_string")))
 @store(type = "rdbms", jdbc.url = "jdbc:mysql://localhost:3306/websubhubdb?useSSL=false", username = "root", password = "rootroot", jdbc.driver.name = "com.mysql.cj.jdbc.Driver")
-define stream webSubStream (callback string,lease_seconds long,secret string,topic string,mode string);
+define stream webSubStream (callback string, lease_seconds long, secret string, topic string, mode string);
 
-@sink(type='websubhub',hub.id = "account_hub",table.name = "AccountNotificationTable",on.error = "STREAM",
-	@map(type='keyvalue'))
-@store(type = "rdbms", jdbc.url = "jdbc:mysql://localhost:3306/websubhubdb?useSSL=false", username = "root", password = "rootroot", 
-        jdbc.driver.name = "com.mysql.cj.jdbc.Driver")
-@OnError(action = "STREAM")
-define stream AccountNotificationStream (topic string,payload string);
-
-@source(type='kafka',
-        topic.list='account_topic',
-        partition.no.list='0',
-        threading.option='single.thread',
-        group.id="group",
-        bootstrap.servers='localhost:9092',
- @map(type='json'))
-define stream SendAccountNotificationStream (topic string,content string,uuid string);
-
-@store(type='rdbms',jdbc.url = "jdbc:mysql://localhost:3306/droppedEventsDB?useSSL=false",username = "root",password = "rootroot",jdbc.driver.name = "com.mysql.cj.jdbc.Driver")
+@store(type = 'rdbms', jdbc.url = "jdbc:mysql://localhost:3306/droppedEventsDB?useSSL=false", username = "root", password = "rootroot", jdbc.driver.name = "com.mysql.cj.jdbc.Driver")
 @PrimaryKey("uuid")
-define table RetryTable (topic string,payload string,uuid string);
+define table RetryTable (topic string, payload string, uuid string);
 
 define trigger FiveMinTrigger at every 30 sec;
 
-@info(name='query1')
-from webSubStream #log("Received to websubhub: ")
-select * 
+@info(name = 'query1')
+from webSubStream#log("Received to websubhub: ")
+select *
 insert into tempStream;
 
-
-@info(name='query2')
-from SendAccountNotificationStream 
-select topic,json:toString(
-                json:setElement(
-                    json:setElement(
-                        json:toObject("""{
+@info(name = 'query2')
+from SendAccountNotificationStream#log("Received event from backend system: ")
+select topic, json:toString(
+ json:setElement(
+ json:setElement(
+ json:toObject("""{
                         "fileName" : "file://Users/ramindu/Desktop/test.log"
-                        }"""), 
-                    '$', content, "content"),
-                    '$', uuid, "uuid"
-                )
-            ) as payload 
-insert  into AccountNotificationStream;
+                        }"""),
+ '$', content, "content"),
+ '$', uuid, "uuid"
+ )
+ ) as payload
+insert into AccountNotificationStream;
 
+@info(name = 'query3')
+from AccountNotificationStream#log("test publishing: ")
+select *
+insert into IgnoreStream1;
 
-@info(name='query3')
-from AccountNotificationStream#log("test publishing: ") 
-select * 
-insert  into IgnoreStream1;
+@info(name = 'handle-error')
+from !AccountNotificationStream#log("FROM ERROR STREAM: ")
+select topic, payload, json:getString(payload, '$.uuid') as uuid
+insert into DBStream;
 
+from DBStream
+select topic, payload, uuid
+update or insert into RetryTable
+    set RetryTable.topic = topic, RetryTable.payload = payload, RetryTable.uuid = uuid
+    on RetryTable.uuid == uuid;
 
-@info(name='handle-error')
-from !AccountNotificationStream 
-select topic,payload,json:getString(payload,'$.uuid') as uuid 
-insert  into DBStream;
+@info(name = 'query6')
+from DBStream#log("Error Occurred!")
+select *
+insert into IgnoreStream2;
 
+@info(name = 'query7')
+from FiveMinTrigger
+join RetryTable as r
+select r.topic as topic, r.payload as payload, r.uuid as uuid
+insert into DeleteFromTableAndSendStream;
 
-@info(name='query5')
-from DBStream[NOT (RetryTable.uuid == uuid in RetryTable)] 
-select * 
-insert  into RetryTable;
+@info(name = 'query8')
+from DeleteFromTableAndSendStream#log("Deleting from retry table: ")
+select uuid
+delete RetryTable
+	on RetryTable.uuid == uuid;
 
+from DeleteFromTableAndSendStream#window.timeBatch(15 sec)
+select *
+insert into WaitTillDeleteStreamAndSendNotification;
 
-@info(name='query6')
-from DBStream#log("Error Occurred!") 
-select * 
-insert  into IgnoreStream2;
+from WaitTillDeleteStreamAndSendNotification#window.lengthBatch(1)
+select *
+insert into WaitTillDeleteStreamAndSendNotification2;
 
-
-@info(name='query7')
-from FiveMinTrigger 
-join RetryTable as r 
-select r.topic as topic,r.payload as payload,r.uuid as uuid,'Please ignore if the notification is received already.' as note 
-insert  into DeleteFromTableAndSendStream;
-
-
-@info(name='query8')
-from DeleteFromTableAndSendStream#log("Deleting from retry table: ") 
-select uuid delete RetryTable for current events on RetryTable.uuid == uuid;
-
-    
-@info(name='query9')
-from DeleteFromTableAndSendStream#log("Resending: ") 
-select topic,json:toString(json:setElement(json:toObject(payload), '$', note, 'note')) as payload 
-insert  into AccountNotificationStream;
+@info(name = 'query9')
+from WaitTillDeleteStreamAndSendNotification2#log("Resending: ")
+select topic, payload
+insert into AccountNotificationStream;
