@@ -1,0 +1,7 @@
+{"event":{"topic":"company_log","content":"clearing initiated for company A","uuid":1001}}
+{"event":{"topic":"company_log","content":"clearing started for company B","uuid":1002}}
+{"event":{"topic":"company_log","content":"clearing completed for company B","uuid":1003}}
+{"event":{"topic":"company_log","content":"clearing initiated for company C","uuid":1004}}
+{"event":{"topic":"company_log","content":"clearing started for company A","uuid":1005}}
+{"event":{"topic":"company_log","content":"clearing completed for company A","uuid":1006}}
+{"event":{"topic":"company_log","content":"clearing completed for company C","uuid":1007}}
